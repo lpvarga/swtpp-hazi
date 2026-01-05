@@ -8,9 +8,22 @@ import Board ( validateFEN, buildBoard, buildFEN
              , Player(Top, Bottom)
              , Cell(Empty, Pawn, Drone, Queen)
              , Pos(Pos)
+             , startingBoard
              )
 
-import Logic (Move(Move), pawnMoves, droneMoves, queenMoves, makeMove, playerWon)
+import Logic (Move(Move), Direction, left, right, up, down, directions
+  , diagonalDirections
+  , setCell
+  , isInsideBoard
+  , toLeft, toRight, toUp, toDown
+  , whatIsInPosition
+  , isCellInPosition
+  , isOnCurrentPlayerSide
+  , crossedCanal, forbiddenTakebackTarget, filterForbiddenTarget
+  , ray, applyRayRules, targetsToMoves
+  , droneTargets
+  , pawnMoves, droneMoves, queenMoves, makeMove, playerWon)
+
 
 main :: IO ()
 main = hspec $ do
@@ -118,3 +131,351 @@ main = hspec $ do
       it "roundtrip works for empty board" $ do
         let fen = "///////"
         buildFEN (buildBoard fen) `shouldBe` fen
+      
+    describe "Martian Chess - Helper functions" $ do
+
+    ---------------------------------------------------------------------------
+    -- Direction constants / list
+    ---------------------------------------------------------------------------
+      describe "directions" $ do
+        it "contains left, up, right, down in this order" $ do
+          directions `shouldBe` [left, up, right, down]
+
+      ---------------------------------------------------------------------------
+      -- isInsideBoard
+      ---------------------------------------------------------------------------
+      describe "isInsideBoard" $ do
+        it "returns True for corners and a middle field" $ do
+          isInsideBoard (Pos 'a' 0) `shouldBe` True
+          isInsideBoard (Pos 'd' 7) `shouldBe` True
+          isInsideBoard (Pos 'c' 4) `shouldBe` True
+
+        it "returns False for positions outside the 4x8 board" $ do
+          isInsideBoard (Pos 'e' 0) `shouldBe` False
+          isInsideBoard (Pos 'a' 8) `shouldBe` False
+          isInsideBoard (Pos '`' 3) `shouldBe` False
+          isInsideBoard (Pos 'b' (-1)) `shouldBe` False
+
+      ---------------------------------------------------------------------------
+      -- toLeft / toRight / toUp / toDown
+      ---------------------------------------------------------------------------
+      describe "step helpers" $ do
+        it "toLeft returns Nothing at the left edge" $ do
+          toLeft (Pos 'a' 3) `shouldBe` Nothing
+
+        it "toLeft returns the neighbor to the left" $ do
+          toLeft (Pos 'b' 3) `shouldBe` Just (Pos 'a' 3)
+
+        it "toRight returns Nothing at the right edge" $ do
+          toRight (Pos 'd' 3) `shouldBe` Nothing
+
+        it "toRight returns the neighbor to the right" $ do
+          toRight (Pos 'c' 3) `shouldBe` Just (Pos 'd' 3)
+
+        it "toUp returns Nothing at the top edge" $ do
+          toUp (Pos 'c' 7) `shouldBe` Nothing
+
+        it "toUp returns the neighbor above" $ do
+          toUp (Pos 'c' 6) `shouldBe` Just (Pos 'c' 7)
+
+        it "toDown returns Nothing at the bottom edge" $ do
+          toDown (Pos 'c' 0) `shouldBe` Nothing
+
+        it "toDown returns the neighbor below" $ do
+          toDown (Pos 'c' 1) `shouldBe` Just (Pos 'c' 0)
+
+      ---------------------------------------------------------------------------
+      -- whatIsInPosition
+      ---------------------------------------------------------------------------
+      describe "whatIsInPosition" $ do
+        it "returns the correct cell on the starting board (top row)" $ do
+          whatIsInPosition startingBoard (Pos 'a' 7) `shouldBe` Just Queen
+          whatIsInPosition startingBoard (Pos 'c' 7) `shouldBe` Just Drone
+          whatIsInPosition startingBoard (Pos 'd' 7) `shouldBe` Just Empty
+
+        it "returns the correct cell on the starting board (bottom row)" $ do
+          whatIsInPosition startingBoard (Pos 'a' 0) `shouldBe` Just Empty
+          whatIsInPosition startingBoard (Pos 'b' 0) `shouldBe` Just Drone
+          whatIsInPosition startingBoard (Pos 'd' 0) `shouldBe` Just Queen
+
+        it "returns Nothing for out-of-board positions" $ do
+          whatIsInPosition startingBoard (Pos 'e' 0) `shouldBe` Nothing
+          whatIsInPosition startingBoard (Pos 'a' 8) `shouldBe` Nothing
+
+      ---------------------------------------------------------------------------
+      -- isCellInPosition
+      ---------------------------------------------------------------------------
+      describe "isCellInPosition" $ do
+        it "returns True when the cell matches" $ do
+          isCellInPosition Queen startingBoard (Pos 'a' 7) `shouldBe` True
+          isCellInPosition Drone startingBoard (Pos 'b' 0) `shouldBe` True
+
+        it "returns False when the cell does not match or out of bounds" $ do
+          isCellInPosition Pawn startingBoard (Pos 'a' 7) `shouldBe` False
+          isCellInPosition Queen startingBoard (Pos 'e' 0) `shouldBe` False
+
+      ---------------------------------------------------------------------------
+      -- isOnCurrentPlayerSide
+      ---------------------------------------------------------------------------
+      describe "isOnCurrentPlayerSide" $ do
+        it "Top side is rows 4..7" $ do
+          isOnCurrentPlayerSide Top (Pos 'a' 7) `shouldBe` True
+          isOnCurrentPlayerSide Top (Pos 'b' 4) `shouldBe` True
+          isOnCurrentPlayerSide Top (Pos 'c' 3) `shouldBe` False
+          isOnCurrentPlayerSide Top (Pos 'd' 0) `shouldBe` False
+
+        it "Bottom side is rows 0..3" $ do
+          isOnCurrentPlayerSide Bottom (Pos 'a' 0) `shouldBe` True
+          isOnCurrentPlayerSide Bottom (Pos 'b' 3) `shouldBe` True
+          isOnCurrentPlayerSide Bottom (Pos 'c' 4) `shouldBe` False
+          isOnCurrentPlayerSide Bottom (Pos 'd' 7) `shouldBe` False
+
+    ---------------------------------------------------------------------------
+    -- More helper-function tests (Logic)
+    ---------------------------------------------------------------------------
+    describe "More helper functions (Logic)" $ do
+
+      -------------------------------------------------------------------------
+      -- crossedCanal
+      -------------------------------------------------------------------------
+      describe "crossedCanal" $ do
+        it "returns False when both positions are on the same side" $ do
+          crossedCanal (Pos 'a' 2) (Pos 'd' 3) `shouldBe` False
+          crossedCanal (Pos 'a' 6) (Pos 'd' 7) `shouldBe` False
+
+        it "returns True when positions are on different sides (canal crossed)" $ do
+          crossedCanal (Pos 'b' 3) (Pos 'b' 4) `shouldBe` True
+          crossedCanal (Pos 'c' 4) (Pos 'c' 3) `shouldBe` True
+
+      -------------------------------------------------------------------------
+      -- forbiddenTakebackTarget
+      -------------------------------------------------------------------------
+      describe "forbiddenTakebackTarget" $ do
+        it "returns Nothing when there is no last move" $ do
+          forbiddenTakebackTarget (Pos 'b' 4) Nothing `shouldBe` Nothing
+
+        it "returns Just start when last move crossed canal and current pos is the last target" $ do
+          let lastMove = Just (Move (Pos 'b' 3) (Pos 'b' 4))
+          forbiddenTakebackTarget (Pos 'b' 4) lastMove `shouldBe` Just (Pos 'b' 3)
+
+        it "returns Nothing when current pos is not the last move target" $ do
+          let lastMove = Just (Move (Pos 'b' 3) (Pos 'b' 4))
+          forbiddenTakebackTarget (Pos 'a' 4) lastMove `shouldBe` Nothing
+
+        it "returns Nothing when the last move did not cross the canal" $ do
+          let lastMove = Just (Move (Pos 'b' 2) (Pos 'b' 3))
+          forbiddenTakebackTarget (Pos 'b' 3) lastMove `shouldBe` Nothing
+
+      -------------------------------------------------------------------------
+      -- filterForbiddenTarget
+      -------------------------------------------------------------------------
+      describe "filterForbiddenTarget" $ do
+        it "removes moves that target the forbidden position" $ do
+          let moves =
+                [ Move (Pos 'a' 0) (Pos 'b' 1)
+                , Move (Pos 'a' 0) (Pos 'c' 2)
+                , Move (Pos 'a' 0) (Pos 'd' 3)
+                ]
+          filterForbiddenTarget (Just (Pos 'c' 2)) moves
+            `shouldBe`
+              [ Move (Pos 'a' 0) (Pos 'b' 1)
+              , Move (Pos 'a' 0) (Pos 'd' 3)
+              ]
+
+      -------------------------------------------------------------------------
+      -- ray
+      -------------------------------------------------------------------------
+      describe "ray" $ do
+        it "generates correct rays in all four orthogonal directions" $ do
+          ray (Pos 'b' 3) left  `shouldBe` [Pos 'a' 3]
+          ray (Pos 'b' 3) right `shouldBe` [Pos 'c' 3, Pos 'd' 3]
+          ray (Pos 'b' 3) up    `shouldBe` [Pos 'b' 4, Pos 'b' 5, Pos 'b' 6, Pos 'b' 7]
+          ray (Pos 'b' 3) down  `shouldBe` [Pos 'b' 2, Pos 'b' 1, Pos 'b' 0]
+
+      -------------------------------------------------------------------------
+      -- applyRayRules
+      -------------------------------------------------------------------------
+      describe "applyRayRules" $ do
+        it "keeps empty squares until the board edge on an empty board" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+          applyRayRules emptyBoard Bottom (ray (Pos 'b' 3) up)
+            `shouldBe`
+              [Pos 'b' 4, Pos 'b' 5, Pos 'b' 6, Pos 'b' 7]
+
+        it "stops before own-side piece and does not include it" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+          let b = setCell emptyBoard (Pos 'b' 2) Pawn
+          applyRayRules b Bottom (ray (Pos 'b' 3) down)
+            `shouldBe` []
+
+        it "includes first opponent-side piece and then stops" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+          let b = setCell emptyBoard (Pos 'b' 4) Pawn
+          applyRayRules b Bottom (ray (Pos 'b' 3) up)
+            `shouldBe` [Pos 'b' 4]
+
+      -------------------------------------------------------------------------
+      -- targetsToMoves
+      -------------------------------------------------------------------------
+      describe "targetsToMoves" $ do
+        it "converts target positions into moves from the given start position" $ do
+          targetsToMoves (Pos 'a' 0) [Pos 'b' 1, Pos 'c' 2]
+            `shouldBe`
+              [ Move (Pos 'a' 0) (Pos 'b' 1)
+              , Move (Pos 'a' 0) (Pos 'c' 2)
+              ]
+
+    ---------------------------------------------------------------------------
+    -- Move generators (pawn / drone / queen)
+    ---------------------------------------------------------------------------
+    describe "Move generation (pawn, drone, queen)" $ do
+
+      let emptyBoard = replicate 8 (replicate 4 Empty)
+
+      -------------------------------------------------------------------------
+      -- Pawn moves
+      -------------------------------------------------------------------------
+      describe "pawnMoves" $ do
+
+        it "can move diagonally on an empty board" $ do
+          let b = setCell emptyBoard (Pos 'b' 2) Pawn
+          pawnMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldMatchList`
+              [ Move (Pos 'b' 2) (Pos 'a' 3)
+              , Move (Pos 'b' 2) (Pos 'c' 3)
+              , Move (Pos 'b' 2) (Pos 'a' 1)
+              , Move (Pos 'b' 2) (Pos 'c' 1)
+              ]
+
+        it "can capture diagonally on the opponent side" $ do
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 3) Pawn)
+                  (Pos 'a' 4)
+                  Drone
+          pawnMoves b Bottom (Pos 'b' 3) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 3) (Pos 'a' 4) ]
+
+        it "cannot capture a piece on its own side" $ do
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 3) Pawn)
+                  (Pos 'a' 2)
+                  Drone
+          pawnMoves b Bottom (Pos 'b' 3) Nothing
+            `shouldNotContain`
+              [ Move (Pos 'b' 3) (Pos 'a' 2) ]
+
+        it "forbids direct takeback after a canal-crossing move" $ do
+          let lastMove = Just (Move (Pos 'a' 3) (Pos 'b' 4))
+          let b = setCell emptyBoard (Pos 'b' 4) Pawn
+
+          pawnMoves b Top (Pos 'b' 4) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 4) (Pos 'a' 3) ]
+
+          pawnMoves b Top (Pos 'b' 4) lastMove
+            `shouldNotContain`
+              [ Move (Pos 'b' 4) (Pos 'a' 3) ]
+
+      -------------------------------------------------------------------------
+      -- Drone moves
+      -------------------------------------------------------------------------
+      describe "droneMoves" $ do
+
+        it "can move on an empty board" $ do
+          let b = setCell emptyBoard (Pos 'b' 2) Drone
+          droneMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 2) (Pos 'b' 3) ]
+
+        it "can capture on the opponent side with correct range" $ do
+          let b =
+                setCell
+                  (setCell
+                    (setCell emptyBoard (Pos 'b' 2) Drone)
+                    (Pos 'b' 4)
+                    Pawn)
+                  (Pos 'b' 5)
+                  Pawn
+          droneMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 2) (Pos 'b' 4) ]
+
+        it "cannot capture a piece on its own side" $ do
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 2) Drone)
+                  (Pos 'b' 1)
+                  Pawn
+          droneMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldNotContain`
+              [ Move (Pos 'b' 2) (Pos 'b' 1) ]
+
+        it "forbids direct takeback after a canal-crossing move" $ do
+          let lastMove = Just (Move (Pos 'b' 3) (Pos 'b' 4))
+          let b = setCell emptyBoard (Pos 'b' 4) Drone
+
+          droneMoves b Top (Pos 'b' 4) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 4) (Pos 'b' 3) ]
+
+          droneMoves b Top (Pos 'b' 4) lastMove
+            `shouldNotContain`
+              [ Move (Pos 'b' 4) (Pos 'b' 3) ]
+
+      -------------------------------------------------------------------------
+      -- Queen moves
+      -------------------------------------------------------------------------
+      describe "queenMoves" $ do
+
+        it "can move in straight directions on an empty board" $ do
+          let b = setCell emptyBoard (Pos 'b' 2) Queen
+          let moves = queenMoves b Bottom (Pos 'b' 2) Nothing
+
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'b' 3)] -- up
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'b' 1)] -- down
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'a' 2)] -- left
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'd' 2)] -- right
+
+        it "can move diagonally on an empty board" $ do
+          let b = setCell emptyBoard (Pos 'b' 2) Queen
+          let moves = queenMoves b Bottom (Pos 'b' 2) Nothing
+
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'a' 3)] -- up-left
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'c' 3)] -- up-right
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'a' 1)] -- down-left
+          moves `shouldContain` [Move (Pos 'b' 2) (Pos 'c' 1)] -- down-right
+
+        it "can capture on the opponent side" $ do
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 2) Queen)
+                  (Pos 'b' 4)
+                  Pawn
+          queenMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 2) (Pos 'b' 4) ]
+
+        it "cannot capture a piece on its own side" $ do
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 2) Queen)
+                  (Pos 'b' 1)
+                  Pawn
+          queenMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldNotContain`
+              [ Move (Pos 'b' 2) (Pos 'b' 1) ]
+
+        it "forbids direct takeback after a canal-crossing move" $ do
+          let lastMove = Just (Move (Pos 'b' 3) (Pos 'b' 4))
+          let b = setCell emptyBoard (Pos 'b' 4) Queen
+
+          queenMoves b Top (Pos 'b' 4) Nothing
+            `shouldContain`
+              [ Move (Pos 'b' 4) (Pos 'b' 3) ]
+
+          queenMoves b Top (Pos 'b' 4) lastMove
+            `shouldNotContain`
+              [ Move (Pos 'b' 4) (Pos 'b' 3) ]
