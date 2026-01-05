@@ -9,6 +9,7 @@ import Board ( validateFEN, buildBoard, buildFEN
              , Cell(Empty, Pawn, Drone, Queen)
              , Pos(Pos)
              , startingBoard
+             , Board
              )
 
 import Logic (Move(Move), Direction, left, right, up, down, directions
@@ -28,6 +29,8 @@ import Logic (Move(Move), Direction, left, right, up, down, directions
   , isTheFieldEmpty
   , setAt
   , makeMove
+  , playerWon
+  , setCell  
   , pawnMoves, droneMoves, queenMoves, makeMove, playerWon)
 
 
@@ -485,7 +488,7 @@ main = hspec $ do
           queenMoves b Top (Pos 'b' 4) lastMove
             `shouldNotContain`
               [ Move (Pos 'b' 4) (Pos 'b' 3) ]
-              
+
       -------------------------------------------------------------------------
       -- pieceValue
       -------------------------------------------------------------------------
@@ -603,3 +606,53 @@ main = hspec $ do
           let (b2, _) = makeMove b1 (Move (Pos 'a' 7) (Pos 'a' 6))
 
           whatIsInPosition b2 (Pos 'd' 0) `shouldBe` Just Pawn
+    
+    ---------------------------------------------------------------------------
+    -- playerWon
+    ---------------------------------------------------------------------------
+    describe "playerWon" $ do
+
+      let emptyBoard :: Board
+          emptyBoard = replicate 8 (replicate 4 Empty)
+
+      it "returns Nothing if the next player still has at least one legal move (startingBoard)" $ do
+        -- last mover = Top -> next player = Bottom -> Bottom has moves on startingBoard
+        playerWon startingBoard Top 0 0 `shouldBe` Nothing
+
+        -- last mover = Bottom -> next player = Top -> Top has moves on startingBoard
+        playerWon startingBoard Bottom 0 0 `shouldBe` Nothing
+
+      it "returns Nothing even if scores are uneven, as long as the next player has moves" $ do
+        playerWon startingBoard Top 100 0 `shouldBe` Nothing
+        playerWon startingBoard Bottom 0 100 `shouldBe` Nothing
+
+      it "returns Just Top if the next player has no moves and Top leads on points" $ do
+        -- empty board => next player has no moves
+        playerWon emptyBoard Top 5 2 `shouldBe` Just Top
+        playerWon emptyBoard Bottom 5 2 `shouldBe` Just Top
+
+      it "returns Just Bottom if the next player has no moves and Bottom leads on points" $ do
+        -- empty board => next player has no moves
+        playerWon emptyBoard Top 2 5 `shouldBe` Just Bottom
+        playerWon emptyBoard Bottom 2 5 `shouldBe` Just Bottom
+
+      it "returns Nothing if the next player has no moves and the score is tied" $ do
+        playerWon emptyBoard Top 3 3 `shouldBe` Nothing
+        playerWon emptyBoard Bottom 3 3 `shouldBe` Nothing
+
+      it "returns Just Top if Bottom is next and has no pieces (no moves), and Top leads" $ do
+        -- Only Top has a Queen -> Bottom has no pieces -> Bottom has no moves
+        let b1 :: Board
+            b1 = setCell emptyBoard (Pos 'b' 6) Queen
+
+        -- last mover = Top -> next player = Bottom (has no moves)
+        playerWon b1 Top 3 0 `shouldBe` Just Top
+
+      it "returns Nothing if Top is next and has a legal move (even if Bottom has no pieces)" $ do
+        -- Only Top has a Queen -> Top has moves
+        let b1 :: Board
+            b1 = setCell emptyBoard (Pos 'b' 6) Queen
+
+        -- last mover = Bottom -> next player = Top (has moves) => game not over
+        playerWon b1 Bottom 3 0 `shouldBe` Nothing
+

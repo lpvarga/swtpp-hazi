@@ -292,4 +292,57 @@ makeMove board (Move s t) = (boardAfter, score)
 -- #######################################################################################################
 
 playerWon :: Board -> Player -> Int -> Int -> Maybe Player
-playerWon _ _ _ _ = Nothing
+playerWon board lastPlayer topScore bottomScore
+  | nextPlayerHasMove = Nothing
+  | topScore > bottomScore = Just Top
+  | bottomScore > topScore = Just Bottom
+  | otherwise = Nothing
+  where
+    nextPlayer :: Player
+    nextPlayer = otherPlayer lastPlayer
+
+    nextPlayerHasMove :: Bool
+    nextPlayerHasMove = hasAnyMove board nextPlayer
+
+    otherPlayer :: Player -> Player
+    otherPlayer Top    = Bottom
+    otherPlayer Bottom = Top
+
+    hasAnyMove :: Board -> Player -> Bool
+    hasAnyMove board' player' = anyHasMoves (positionsOnSide player')
+      where
+        anyHasMoves :: [Pos] -> Bool
+        anyHasMoves []     = False
+        anyHasMoves (p:ps)
+          | null (movesFromPos board' player' p) = anyHasMoves ps
+          | otherwise                            = True
+
+    positionsOnSide :: Player -> [Pos]
+    positionsOnSide player' = allPositions minRow maxRow minCol maxCol
+      where
+        allPositions :: Int -> Int -> Char -> Char -> [Pos]
+        allPositions rFrom rTo cFrom cTo =
+          positionsInRows rFrom rTo (cols cFrom cTo)
+
+        positionsInRows :: Int -> Int -> [Char] -> [Pos]
+        positionsInRows r rTo cs
+          | r > rTo    = []
+          | otherwise  = positionsInCols r cs ++ positionsInRows (r + 1) rTo cs
+
+        positionsInCols :: Int -> [Char] -> [Pos]
+        positionsInCols _ [] = []
+        positionsInCols r (c:cs) =
+          Pos c r : positionsInCols r cs
+
+        cols :: Char -> Char -> [Char]
+        cols cFrom cTo
+          | cFrom > cTo = []
+          | otherwise   = cFrom : cols (succ cFrom) cTo
+
+    movesFromPos :: Board -> Player -> Pos -> [Move]
+    movesFromPos board' player' pos'
+      | not (isOnCurrentPlayerSide player' pos') = []
+      | isCellInPosition Pawn  board' pos'       = pawnMoves  board' player' pos' Nothing
+      | isCellInPosition Drone board' pos'       = droneMoves board' player' pos' Nothing
+      | isCellInPosition Queen board' pos'       = queenMoves board' player' pos' Nothing
+      | otherwise                                = []
