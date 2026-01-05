@@ -3,7 +3,7 @@ module Board where  -- do NOT CHANGE export of module
 -- IMPORTS HERE
 -- Note: Imports allowed that DO NOT REQUIRE TO ANY CHANGES TO package.yaml, e.g.:
 --       import Data.Chars
-import Data.Char (digitToInt)
+import Data.Char (digitToInt,isDigit)
 import Text.Read()
 import Control.Applicative (Alternative(empty))
 
@@ -59,31 +59,22 @@ buildPos _ = error "Invalid position format"
 validateFEN :: String -> Bool
 validateFEN = validateFENHelper 8 4
   where
-    -- rowsLeft: how many rows still to parse (starts at 8)
-    -- spacesLeft: how many squares still free in the current row (starts at 4)
     validateFENHelper :: Int -> Int -> String -> Bool
-    validateFENHelper rowsLeft spacesLeft input
-      | rowsLeft < 1     = False
-      | spacesLeft < 0   = False
-      | null input       =
-          rowsLeft == 1 && (spacesLeft == 0 || spacesLeft == 4)
-      | otherwise =
-          case input of
-            ('/':rest) ->
-              (spacesLeft == 0 || spacesLeft == 4)
-              && rowsLeft > 1
-              && validateFENHelper (rowsLeft - 1) 4 rest
+    validateFENHelper rows spaces [] = rows == 1 && notInternalField
+      where
+        notInternalField = spaces == 0 || spaces == 4
 
-            (c:rest)
-              | c == 'p' || c == 'd' || c == 'q' ->
-                  validateFENHelper rowsLeft (spacesLeft - 1) rest
+    validateFENHelper rows spaces input
+      | rows < 1 = False
+      | spaces < 0 = False
 
-              | c >= '1' && c <= '3' ->
-                  validateFENHelper rowsLeft (spacesLeft - digitToInt c) rest
-
-              | otherwise ->
-                  False
-
+    validateFENHelper rows spaces (c:cs)
+      | c == '/' = notInternalField && rows > 1 && validateFENHelper (rows - 1) 4 cs
+      | c == 'p' || c == 'd' ||  c == 'q' = validateFENHelper rows (spaces - 1) cs
+      | c >= '1' && c <= '3' = validateFENHelper rows (spaces - digitToInt c) cs
+      where
+        notInternalField = spaces == 0 || spaces == 4
+    validateFENHelper _ _ _ = False
 
 
 -- ##############################################################################
@@ -92,7 +83,35 @@ validateFEN = validateFENHelper 8 4
 -- ##############################################################################
 
 buildBoard :: String -> Board
-buildBoard _ = startingBoard
+buildBoard fen = map convertFenToRow (splitFEN fen)
+  where
+    charToCell :: Char -> Cell
+    charToCell 'q' = Queen
+    charToCell 'd' = Drone
+    charToCell 'p' = Pawn
+    charToCell 'e' = Empty
+
+    foo :: String -> String
+    -- foo [] = "eeee"                 had to remove, but was super ugly, would loved to leave in xddd
+    foo [] = ""
+    foo (c:cs)
+      | isDigit c = replicate (digitToInt c) 'e' ++ foo cs
+      | otherwise = c : foo cs
+
+    normalizeRow :: String -> String
+    normalizeRow s = take 4 (s ++ replicate 4 'e')
+
+    convertFenToRow :: String -> [Cell]
+    convertFenToRow fenrow =  map charToCell (normalizeRow (foo fenrow))
+
+    splitFEN :: String -> [String]
+    splitFEN string = splitFENHelper string []
+      where
+        splitFENHelper :: String -> String -> [String]
+        splitFENHelper [] acc = [acc]
+        splitFENHelper (c:cs) acc
+          | c == '/' = acc : splitFENHelper cs []
+          | otherwise = splitFENHelper cs (acc ++ [c])
 
 -- ##############################################################################
 -- ################## IMPLEMENT buildFEN :: Board -> String   ###################
@@ -100,4 +119,28 @@ buildBoard _ = startingBoard
 -- ##############################################################################
 
 buildFEN :: Board -> String
-buildFEN board = startingFEN
+buildFEN board = compressFEN (buildFENHelper board)
+  where
+    buildFENHelper :: Board -> String
+    buildFENHelper [row] = convertRow row
+    buildFENHelper (row:rows) = convertRow row ++ "/" ++ buildFENHelper rows
+
+    cellToChar :: Cell -> Char
+    cellToChar Queen = 'q'
+    cellToChar Drone = 'd'
+    cellToChar Pawn = 'p'
+    cellToChar Empty = 'e'
+
+    convertRow :: [Cell] -> String
+    convertRow = map cellToChar
+
+    compressFEN :: String -> String
+    compressFEN [] = []
+    compressFEN ('e':'e':'e':'e':xs) = compressFEN xs
+    compressFEN ('e':xs) =
+      show n ++ compressFEN rest
+      where
+        n    = 1 + length (takeWhile (=='e') xs)
+        rest = drop (n - 1) xs
+
+    compressFEN (c:cs) = c : compressFEN cs
