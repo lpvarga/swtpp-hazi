@@ -27,6 +27,12 @@ buildMove s = case break (=='-') s of
 
 data Direction = L | R | U | D | LU | RU | LD | RD deriving (Eq, Show)
 
+pieceValue :: Cell -> Int
+pieceValue Pawn  = 1
+pieceValue Drone = 2
+pieceValue Queen = 3
+pieceValue Empty = 0
+
 left, right, up, down, upLeft, upRight, downLeft, downRight :: Direction
 left      = L
 right     = R
@@ -106,6 +112,10 @@ whatIsInPosition board pos
   where
     (ri, ci) = posToIndices pos
 
+isTheFieldEmpty :: Board -> Pos -> Bool
+isTheFieldEmpty board pos
+  | whatIsInPosition board pos == Just Empty = True
+  | otherwise                                = False
 
 isCellInPosition :: Cell -> Board -> Pos -> Bool
 isCellInPosition cell board pos =
@@ -255,7 +265,26 @@ queenMoves board player pos lastMove
 -- #######################################################################################################
 
 makeMove :: Board -> Move -> (Board, Int)
-makeMove board _ = (board, 0)
+makeMove board (Move s t) = (boardAfter, score)
+  where
+    movingPiece :: Cell
+    movingPiece = getCellOrEmpty (whatIsInPosition board s)
+
+    capturedPiece :: Cell
+    capturedPiece = getCellOrEmpty (whatIsInPosition board t)
+
+    score :: Int
+    score
+      | capturedPiece == Empty = 0
+      | otherwise              = pieceValue capturedPiece
+
+    boardAfter :: Board
+    boardAfter = setCell (setCell board s Empty) t movingPiece
+
+    getCellOrEmpty :: Maybe Cell -> Cell
+    getCellOrEmpty (Just c) = c
+    getCellOrEmpty Nothing  = Empty
+
 
 -- #######################################################################################################
 -- ################## playerWon :: Board -> Player -> Int -> Int -> Maybe Player        ##################

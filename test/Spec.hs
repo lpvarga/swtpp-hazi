@@ -22,6 +22,12 @@ import Logic (Move(Move), Direction, left, right, up, down, directions
   , crossedCanal, forbiddenTakebackTarget, filterForbiddenTarget
   , ray, applyRayRules, targetsToMoves
   , droneTargets
+  , pieceValue
+  , step
+  , toUpLeft, toUpRight, toDownLeft, toDownRight
+  , isTheFieldEmpty
+  , setAt
+  , makeMove
   , pawnMoves, droneMoves, queenMoves, makeMove, playerWon)
 
 
@@ -479,3 +485,121 @@ main = hspec $ do
           queenMoves b Top (Pos 'b' 4) lastMove
             `shouldNotContain`
               [ Move (Pos 'b' 4) (Pos 'b' 3) ]
+              
+      -------------------------------------------------------------------------
+      -- pieceValue
+      -------------------------------------------------------------------------
+      describe "pieceValue" $ do
+        it "returns correct point values for all piece types" $ do
+          pieceValue Pawn  `shouldBe` 1
+          pieceValue Drone `shouldBe` 2
+          pieceValue Queen `shouldBe` 3
+          pieceValue Empty `shouldBe` 0
+
+      -------------------------------------------------------------------------
+      -- diagonal step helpers (toUpLeft / toUpRight / toDownLeft / toDownRight)
+      -------------------------------------------------------------------------
+      describe "diagonal step helpers" $ do
+        it "returns Just neighbor for diagonal steps inside the board" $ do
+          toUpLeft    (Pos 'b' 3) `shouldBe` Just (Pos 'a' 4)
+          toUpRight   (Pos 'b' 3) `shouldBe` Just (Pos 'c' 4)
+          toDownLeft  (Pos 'b' 3) `shouldBe` Just (Pos 'a' 2)
+          toDownRight (Pos 'b' 3) `shouldBe` Just (Pos 'c' 2)
+
+        it "returns Nothing when diagonal step would leave the board" $ do
+          toUpLeft    (Pos 'a' 7) `shouldBe` Nothing
+          toUpRight   (Pos 'd' 7) `shouldBe` Nothing
+          toDownLeft  (Pos 'a' 0) `shouldBe` Nothing
+          toDownRight (Pos 'd' 0) `shouldBe` Nothing
+
+      -------------------------------------------------------------------------
+      -- isTheFieldEmpty
+      -------------------------------------------------------------------------
+      describe "isTheFieldEmpty" $ do
+        it "returns True when the position contains Empty" $ do
+          isTheFieldEmpty startingBoard (Pos 'd' 7) `shouldBe` True
+
+        it "returns False when the position contains a piece" $ do
+          isTheFieldEmpty startingBoard (Pos 'a' 7) `shouldBe` False
+
+        it "returns False for out-of-board positions" $ do
+          isTheFieldEmpty startingBoard (Pos 'e' 0) `shouldBe` False
+          isTheFieldEmpty startingBoard (Pos 'a' 8) `shouldBe` False
+
+      -------------------------------------------------------------------------
+      -- setAt (only needed in tests)
+      -------------------------------------------------------------------------
+      describe "setAt" $ do
+        it "returns [] when setting on an empty list" $ do
+          setAt 0 'x' [] `shouldBe` ([] :: [Char])
+
+        it "replaces the head when index is 0" $ do
+          setAt 0 'x' "abc" `shouldBe` "xbc"
+
+        it "replaces an element when index is > 0" $ do
+          setAt 2 'x' "abcd" `shouldBe` "abxd"
+
+        it "does nothing when index is out of range (keeps list unchanged)" $ do
+          setAt 10 'x' "abcd" `shouldBe` "abcd"
+
+      -------------------------------------------------------------------------
+      -- setCell (only needed in tests)
+      -------------------------------------------------------------------------
+      describe "setCell" $ do
+        it "sets exactly one position and leaves others unchanged" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+          let b1 = setCell emptyBoard (Pos 'b' 2) Queen
+
+          whatIsInPosition b1 (Pos 'b' 2) `shouldBe` Just Queen
+          whatIsInPosition b1 (Pos 'a' 2) `shouldBe` Just Empty
+          whatIsInPosition b1 (Pos 'b' 3) `shouldBe` Just Empty
+
+      -------------------------------------------------------------------------
+      -- droneTargets (maxDist branch: max 1 vs >1)
+      -------------------------------------------------------------------------
+      describe "droneTargets" $ do
+        it "uses maxDist > 1 when there are multiple pieces on the ray" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Drone at b2 (Bottom side).
+          -- Put two pieces somewhere on the UP ray (b4 and b6).
+          -- This makes countPiecesInDirection up == 2, so maxDist == 2.
+          let b1 = setCell emptyBoard (Pos 'b' 2) Drone
+          let b2 = setCell (setCell b1 (Pos 'b' 4) Pawn) (Pos 'b' 6) Pawn
+
+          droneTargets b2 Bottom (Pos 'b' 2)
+            `shouldContain`
+              [Pos 'b' 3, Pos 'b' 4]  -- two-step (includes capture square at b4)
+
+      -------------------------------------------------------------------------
+      -- makeMove
+      -------------------------------------------------------------------------
+      describe "makeMove" $ do
+        it "moves a piece to an empty target and returns score 0" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+          let b1 = setCell emptyBoard (Pos 'b' 2) Drone
+
+          let (b2, s) = makeMove b1 (Move (Pos 'b' 2) (Pos 'b' 3))
+
+          s `shouldBe` 0
+          whatIsInPosition b2 (Pos 'b' 2) `shouldBe` Just Empty
+          whatIsInPosition b2 (Pos 'b' 3) `shouldBe` Just Drone
+
+        it "captures a piece, replaces it, and returns the correct score" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Drone captures Queen
+          let b1 = setCell (setCell emptyBoard (Pos 'b' 2) Drone) (Pos 'b' 3) Queen
+          let (b2, s) = makeMove b1 (Move (Pos 'b' 2) (Pos 'b' 3))
+
+          s `shouldBe` 3
+          whatIsInPosition b2 (Pos 'b' 2) `shouldBe` Just Empty
+          whatIsInPosition b2 (Pos 'b' 3) `shouldBe` Just Drone
+
+        it "does not affect unrelated squares" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          let b1 = setCell (setCell emptyBoard (Pos 'a' 7) Queen) (Pos 'd' 0) Pawn
+          let (b2, _) = makeMove b1 (Move (Pos 'a' 7) (Pos 'a' 6))
+
+          whatIsInPosition b2 (Pos 'd' 0) `shouldBe` Just Pawn
