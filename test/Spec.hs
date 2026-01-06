@@ -74,6 +74,9 @@ main = hspec $ do
 
       it "rejects slash inside an incomplete row (width 1..3)" $ do
         validateFEN "q/qdp1/dpp1///1ppd/1pdq/1dqq" `shouldBe` False
+      
+      it "rejects invalid expanded empty row example" $ do
+        validateFEN "q21/qdd1/1p11/12q/pp11/pppd/13/d1q1" `shouldBe`False
     
     ---------------------------------------------------------------------------
     -- buildBoard tests

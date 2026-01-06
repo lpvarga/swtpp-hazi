@@ -57,24 +57,25 @@ buildPos _ = error "Invalid position format"
 -- ##############################################################################
 
 validateFEN :: String -> Bool
-validateFEN = validateFENHelper 8 4
+validateFEN = validateFENHelper 8 4 False
   where
-    validateFENHelper :: Int -> Int -> String -> Bool
-    validateFENHelper rows spaces [] = rows == 1 && notInternalField
+    validateFENHelper :: Int -> Int -> Bool -> String -> Bool
+    validateFENHelper rows spaces letterInBlock [] = rows == 1 && notInternalField
       where
         notInternalField = spaces == 0 || spaces == 4
 
-    validateFENHelper rows spaces input
+    validateFENHelper rows spaces _ input
       | rows < 1 = False
       | spaces < 0 = False
 
-    validateFENHelper rows spaces (c:cs)
-      | c == '/' = notInternalField && rows > 1 && validateFENHelper (rows - 1) 4 cs
-      | c == 'p' || c == 'd' ||  c == 'q' = validateFENHelper rows (spaces - 1) cs
-      | c >= '1' && c <= '3' = validateFENHelper rows (spaces - digitToInt c) cs
+    validateFENHelper rows spaces letterInBlock (c:cs)
+      | c == '/' = (previousWasSlash || letterInBlock)  && notInternalField && rows > 1 && validateFENHelper (rows - 1) 4 False cs
+      | c == 'p' || c == 'd' ||  c == 'q' = validateFENHelper rows (spaces - 1) True cs
+      | c >= '1' && c <= '3' = validateFENHelper rows (spaces - digitToInt c) letterInBlock cs
       where
         notInternalField = spaces == 0 || spaces == 4
-    validateFENHelper _ _ _ = False
+        previousWasSlash = spaces == 4
+    validateFENHelper _ _ _ _ = False
 
 
 -- ##############################################################################
