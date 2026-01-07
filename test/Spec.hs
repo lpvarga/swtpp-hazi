@@ -27,6 +27,7 @@ import Logic (Move(Move), Direction, left, right, up, down, directions
   , step
   , toUpLeft, toUpRight, toDownLeft, toDownRight
   , isTheFieldEmpty
+  , isFigurePresentOnPlayerSide
   , setAt
   , makeMove
   , playerWon
@@ -305,26 +306,109 @@ main = hspec $ do
           ray (Pos 'b' 3) down  `shouldBe` [Pos 'b' 2, Pos 'b' 1, Pos 'b' 0]
 
       -------------------------------------------------------------------------
-      -- applyRayRules
+      -- applyRayRules (updated signature + fusion rules)
       -------------------------------------------------------------------------
       describe "applyRayRules" $ do
-        it "keeps empty squares until the board edge on an empty board" $ do
+
+        it "keeps empty squares until the board edge on an empty board (Drone moving)" $ do
           let emptyBoard = replicate 8 (replicate 4 Empty)
-          applyRayRules emptyBoard Bottom (ray (Pos 'b' 3) up)
+          applyRayRules emptyBoard Bottom Drone (ray (Pos 'b' 3) up)
             `shouldBe`
               [Pos 'b' 4, Pos 'b' 5, Pos 'b' 6, Pos 'b' 7]
 
-        it "stops before own-side piece and does not include it" $ do
+        it "stops before own-side piece and does not include it (Drone moving)" $ do
           let emptyBoard = replicate 8 (replicate 4 Empty)
           let b = setCell emptyBoard (Pos 'b' 2) Pawn
-          applyRayRules b Bottom (ray (Pos 'b' 3) down)
+          applyRayRules b Bottom Drone (ray (Pos 'b' 3) down)
             `shouldBe` []
 
-        it "includes first opponent-side piece and then stops" $ do
+        it "includes first opponent-side piece and then stops (Drone moving)" $ do
           let emptyBoard = replicate 8 (replicate 4 Empty)
           let b = setCell emptyBoard (Pos 'b' 4) Pawn
-          applyRayRules b Bottom (ray (Pos 'b' 3) up)
+          applyRayRules b Bottom Drone (ray (Pos 'b' 3) up)
             `shouldBe` [Pos 'b' 4]
+
+        it "allows fusion-capture on own side (Pawn onto Drone) ONLY when mover has that figure present" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Bottom side setup:
+          -- mover is Pawn (figure=Pawn)
+          -- target square has Drone on Bottom side
+          -- and Bottom has at least one Pawn somewhere (so presence-check is True)
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 1) Pawn)   -- presence of Pawn on Bottom side
+                  (Pos 'b' 2)
+                  Drone
+
+          -- ray from b3 down hits b2 first
+          applyRayRules b Bottom Pawn (ray (Pos 'b' 3) down)
+            `shouldBe` [Pos 'b' 2]
+
+        it "does NOT allow fusion-capture on own side if mover figure is NOT present on that side" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Bottom has NO Pawn anywhere, but there is a Drone at b2.
+          -- mover is Pawn (figure=Pawn) => presence-check False => cannot fuse.
+          let b = setCell emptyBoard (Pos 'b' 2) Drone
+
+          applyRayRules b Bottom Pawn (ray (Pos 'b' 3) down)
+            `shouldBe` []   -- blocked by own-side piece, no fusion allowed
+
+        it "allows fusion-capture on own side (Drone onto Pawn) ONLY when mover has that figure present" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Bottom has a Drone somewhere (presence-check for Drone = True)
+          -- target square has Pawn on Bottom side
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'a' 0) Drone)  -- presence of Drone on Bottom side
+                  (Pos 'b' 2)
+                  Pawn
+
+          applyRayRules b Bottom Drone (ray (Pos 'b' 3) down)
+            `shouldBe` [Pos 'b' 2]
+
+        it "does NOT allow fusion-capture (Drone onto Pawn) if mover figure is missing on that side" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Bottom has NO Drone anywhere, but there is a Pawn at b2.
+          -- mover is Drone (figure=Drone) => presence-check False => cannot fuse.
+          let b = setCell emptyBoard (Pos 'b' 2) Pawn
+
+          applyRayRules b Bottom Drone (ray (Pos 'b' 3) down)
+            `shouldBe` []   -- blocked by own-side piece, no fusion allowed
+
+
+      -------------------------------------------------------------------------
+      -- isFigurePresentOnPlayerSide (helper used by fusion rules)
+      -------------------------------------------------------------------------
+      describe "isFigurePresentOnPlayerSide" $ do
+
+        it "returns False on empty board for Pawn/Drone/Queen" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+          isFigurePresentOnPlayerSide emptyBoard Top Pawn    `shouldBe` False
+          isFigurePresentOnPlayerSide emptyBoard Top Drone   `shouldBe` False
+          isFigurePresentOnPlayerSide emptyBoard Top Queen   `shouldBe` False
+          isFigurePresentOnPlayerSide emptyBoard Bottom Pawn `shouldBe` False
+          isFigurePresentOnPlayerSide emptyBoard Bottom Drone `shouldBe` False
+          isFigurePresentOnPlayerSide emptyBoard Bottom Queen `shouldBe` False
+
+        it "returns True only when the figure exists on that player's side" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Put a Pawn on Top side (row 6) and a Drone on Bottom side (row 1)
+          let b =
+                setCell
+                  (setCell emptyBoard (Pos 'b' 6) Pawn)
+                  (Pos 'c' 1)
+                  Drone
+
+          isFigurePresentOnPlayerSide b Top Pawn     `shouldBe` True
+          isFigurePresentOnPlayerSide b Top Drone    `shouldBe` False
+          isFigurePresentOnPlayerSide b Bottom Drone `shouldBe` True
+          isFigurePresentOnPlayerSide b Bottom Pawn  `shouldBe` False
+
 
       -------------------------------------------------------------------------
       -- targetsToMoves
@@ -369,14 +453,14 @@ main = hspec $ do
             `shouldContain`
               [ Move (Pos 'b' 3) (Pos 'a' 4) ]
 
-        it "cannot capture a piece on its own side" $ do
+        it "can land on an own-side piece (fusion square) when rules allow it" $ do
           let b =
                 setCell
                   (setCell emptyBoard (Pos 'b' 3) Pawn)
                   (Pos 'a' 2)
                   Drone
           pawnMoves b Bottom (Pos 'b' 3) Nothing
-            `shouldNotContain`
+            `shouldContain`
               [ Move (Pos 'b' 3) (Pos 'a' 2) ]
 
         it "forbids direct takeback after a canal-crossing move" $ do
@@ -414,17 +498,18 @@ main = hspec $ do
           droneMoves b Bottom (Pos 'b' 2) Nothing
             `shouldContain`
               [ Move (Pos 'b' 2) (Pos 'b' 4) ]
-
-        it "cannot capture a piece on its own side" $ do
+              
+        it "can land on an own-side piece (fusion square) when rules allow it" $ do
           let b =
                 setCell
                   (setCell emptyBoard (Pos 'b' 2) Drone)
                   (Pos 'b' 1)
                   Pawn
           droneMoves b Bottom (Pos 'b' 2) Nothing
-            `shouldNotContain`
+            `shouldContain`
               [ Move (Pos 'b' 2) (Pos 'b' 1) ]
-
+        
+        
         it "forbids direct takeback after a canal-crossing move" $ do
           let lastMove = Just (Move (Pos 'b' 3) (Pos 'b' 4))
           let b = setCell emptyBoard (Pos 'b' 4) Drone
@@ -470,14 +555,14 @@ main = hspec $ do
             `shouldContain`
               [ Move (Pos 'b' 2) (Pos 'b' 4) ]
 
-        it "cannot capture a piece on its own side" $ do
+        it "can land on an own-side piece (fusion square) when rules allow it" $ do
           let b =
                 setCell
-                  (setCell emptyBoard (Pos 'b' 2) Queen)
+                  (setCell emptyBoard (Pos 'b' 2) Drone)
                   (Pos 'b' 1)
                   Pawn
-          queenMoves b Bottom (Pos 'b' 2) Nothing
-            `shouldNotContain`
+          droneMoves b Bottom (Pos 'b' 2) Nothing
+            `shouldContain`
               [ Move (Pos 'b' 2) (Pos 'b' 1) ]
 
         it "forbids direct takeback after a canal-crossing move" $ do
@@ -591,16 +676,28 @@ main = hspec $ do
           whatIsInPosition b2 (Pos 'b' 2) `shouldBe` Just Empty
           whatIsInPosition b2 (Pos 'b' 3) `shouldBe` Just Drone
 
-        it "captures a piece, replaces it, and returns the correct score" $ do
+        it "captures an opponent-side piece, replaces it, and returns the correct score" $ do
           let emptyBoard = replicate 8 (replicate 4 Empty)
 
-          -- Drone captures Queen
-          let b1 = setCell (setCell emptyBoard (Pos 'b' 2) Drone) (Pos 'b' 3) Queen
-          let (b2, s) = makeMove b1 (Move (Pos 'b' 2) (Pos 'b' 3))
+          -- Drone captures Queen on the opponent side (row 4+)
+          let b1 = setCell (setCell emptyBoard (Pos 'b' 2) Drone) (Pos 'b' 4) Queen
+          let (b2, s) = makeMove b1 (Move (Pos 'b' 2) (Pos 'b' 4))
 
           s `shouldBe` 3
           whatIsInPosition b2 (Pos 'b' 2) `shouldBe` Just Empty
+          whatIsInPosition b2 (Pos 'b' 4) `shouldBe` Just Drone
+
+        it "returns score 0 when moving onto an occupied square on the mover's own side" $ do
+          let emptyBoard = replicate 8 (replicate 4 Empty)
+
+          -- Start is Bottom side, target is also Bottom side => score must be 0
+          let b1 = setCell (setCell emptyBoard (Pos 'b' 2) Drone) (Pos 'b' 3) Queen
+          let (b2, s) = makeMove b1 (Move (Pos 'b' 2) (Pos 'b' 3))
+
+          s `shouldBe` 0
+          whatIsInPosition b2 (Pos 'b' 2) `shouldBe` Just Empty
           whatIsInPosition b2 (Pos 'b' 3) `shouldBe` Just Drone
+
 
         it "does not affect unrelated squares" $ do
           let emptyBoard = replicate 8 (replicate 4 Empty)

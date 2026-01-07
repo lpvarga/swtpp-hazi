@@ -7,6 +7,7 @@ module Logic where  -- do NOT CHANGE export of module
 import Board
 import Data.Char()
 import Data.Maybe()
+import Board (Cell(Pawn, Drone))
 
 data Move = Move {start :: Pos, target :: Pos}
 
@@ -90,14 +91,11 @@ toDownRight = step downRight
 posToIndices :: Pos -> (Int, Int)
 posToIndices (Pos c r) = (7 - r, fromEnum c - fromEnum 'a')
 
---only needed in tests
 setAt :: Int -> a -> [a] -> [a]
 setAt _ _ [] = []
 setAt 0 v (_:xs) = v : xs
 setAt n v (x:xs) = x : setAt (n - 1) v xs
--- Set a single cell on a board at a given Pos
 
---only needed in tests
 setCell :: Board -> Pos -> Cell -> Board
 setCell board p cell = setAt ri newRow board
   where
@@ -151,17 +149,57 @@ ray pos dir = go (step dir pos)
     go Nothing        = []
     go (Just nextPos) = nextPos : ray nextPos dir
 
-
-applyRayRules :: Board -> Player -> [Pos] -> [Pos]
-applyRayRules _ _ [] = []
-applyRayRules board player (p:ps)
-  | isCellInPosition Empty board p = p : applyRayRules board player ps
+applyRayRules :: Board -> Player -> Cell -> [Pos] -> [Pos]
+applyRayRules _ _ _ [] = []
+applyRayRules board player figure (p:ps)
+  | isCellInPosition Empty board p = p : applyRayRules board player figure ps
+  | canFuseHere                    = [p]
   | isOnCurrentPlayerSide player p = []
   | otherwise                      = [p]
+  where
+    onOwnSide :: Bool
+    onOwnSide = isOnCurrentPlayerSide player p
+
+    present :: Bool
+    present = isFigurePresentOnPlayerSide board player figure
+
+    canFuseHere :: Bool
+    canFuseHere =
+      onOwnSide
+        && present
+        && ( fusePawnOntoPawn || fusePawnOntoDrone || fuseDroneOntoPawn )
+
+    fusePawnOntoPawn :: Bool
+    fusePawnOntoPawn =
+      isCellInPosition Pawn board p
+        && (figure == Pawn || figure == Drone)
+
+    fusePawnOntoDrone :: Bool
+    fusePawnOntoDrone =
+      isCellInPosition Pawn board p
+        && figure == Drone
+
+    fuseDroneOntoPawn :: Bool
+    fuseDroneOntoPawn =
+      isCellInPosition Drone board p
+        && figure == Pawn
 
 targetsToMoves :: Pos -> [Pos] -> [Move]
 targetsToMoves _ [] = []
 targetsToMoves startPos (p:ps) = Move startPos p : targetsToMoves startPos ps
+
+isFigurePresentOnPlayerSide :: Board -> Player -> Cell -> Bool
+isFigurePresentOnPlayerSide board player figure = not (null matches)
+  where
+    allPos   :: [Pos]
+    allPos   = [Pos c r | r <- [minRow..maxRow], c <- [minCol..maxCol]]
+
+    nonEmpty :: [Pos]
+    nonEmpty = filter (\p -> not (isTheFieldEmpty board p)) allPos
+
+    matches  :: [Pos]
+    matches  = filter (\p -> isOnCurrentPlayerSide player p && isCellInPosition figure board p) nonEmpty
+
 
 
 -- ########################################################################################################
@@ -191,7 +229,7 @@ pawnMoves board player pos lastMove
         go :: [Direction] -> [Pos]
         go [] = []
         go (d:ds) =
-          applyPawnRules (applyRayRules board' player' (ray pos' d)) ++ go ds
+          applyPawnRules  (applyRayRules board' player' Pawn (ray pos' d)) ++ go ds
 
 
 -- #######################################################################################################
@@ -206,7 +244,7 @@ droneTargets board' player' pos' = go directions
     go :: [Direction] -> [Pos]
     go [] = []
     go (d:ds) =
-      applyDroneRules d (applyRayRules board' player' (ray pos' d)) ++ go ds
+      applyDroneRules d (applyRayRules board' player' Drone (ray pos' d))  ++ go ds
 
     applyDroneRules :: Direction -> [Pos] -> [Pos]
     applyDroneRules dir = take maxDist
@@ -256,7 +294,7 @@ queenMoves board player pos lastMove
         go :: [Direction] -> [Pos]
         go [] = []
         go (d:ds) =
-          applyRayRules board' player' (ray pos' d) ++ go ds
+          applyRayRules board' player' Queen (ray pos' d) ++ go ds
 
 
 -- #######################################################################################################
@@ -267,23 +305,58 @@ queenMoves board player pos lastMove
 makeMove :: Board -> Move -> (Board, Int)
 makeMove board (Move s t) = (boardAfter, score)
   where
+    -- The "current player" is determined from the START square (valid moves guarantee this).
+    mover :: Player
+    mover
+      | isOnCurrentPlayerSide Top s = Top
+      | otherwise                   = Bottom
+
     movingPiece :: Cell
     movingPiece = getCellOrEmpty (whatIsInPosition board s)
 
-    capturedPiece :: Cell
-    capturedPiece = getCellOrEmpty (whatIsInPosition board t)
+    targetPiece :: Cell
+    targetPiece = getCellOrEmpty (whatIsInPosition board t)
+
+    targetOnMoverSide :: Bool
+    targetOnMoverSide = isOnCurrentPlayerSide mover t
 
     score :: Int
     score
-      | capturedPiece == Empty = 0
-      | otherwise              = pieceValue capturedPiece
+      | targetPiece == Empty        = 0
+      | targetOnMoverSide           = 0
+      | otherwise                   = pieceValue targetPiece
+
+    fusionResult :: Maybe Cell
+    fusionResult
+      | targetOnMoverSide
+        && missing Queen
+        && isPawnDronePair movingPiece targetPiece = Just Queen
+      | targetOnMoverSide
+        && missing Drone
+        && movingPiece == Pawn
+        && targetPiece == Pawn                      = Just Drone
+      | otherwise                                   = Nothing
+
+    missing :: Cell -> Bool
+    missing fig = not (isFigurePresentOnPlayerSide board mover fig)
+
+    isPawnDronePair :: Cell -> Cell -> Bool
+    isPawnDronePair a b =
+      (a == Pawn && b == Drone) || (a == Drone && b == Pawn)
 
     boardAfter :: Board
-    boardAfter = setCell (setCell board s Empty) t movingPiece
+    boardAfter
+      | targetPiece == Empty = movePiece movingPiece
+      | fusionResult /= Nothing = movePiece (getCellOrEmpty fusionResult)
+      | otherwise = movePiece movingPiece
+
+    movePiece :: Cell -> Board
+    movePiece piece = setCell (setCell board s Empty) t piece
 
     getCellOrEmpty :: Maybe Cell -> Cell
     getCellOrEmpty (Just c) = c
     getCellOrEmpty Nothing  = Empty
+
 
 
 -- #######################################################################################################
